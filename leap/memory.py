@@ -149,6 +149,10 @@ class ConversationMemory:
         return counts.most_common(1)[0][0]
 
     @property
+    def recent_emotions(self) -> list[str]:
+        return [emotion for emotion, _ in self._emotion_arc[-3:]]
+
+    @property
     def last_stage(self) -> str:
         if self._turns:
             return self._turns[-1].stage
@@ -159,6 +163,10 @@ class ConversationMemory:
         if self._turns:
             return self._turns[-1].mode
         return "continue"
+
+    @property
+    def known_entities(self) -> list[str]:
+        return [entity for entity, _ in self._entities.most_common(6)]
 
     # ── Compression ────────────────────────────────────────────────────────────
     def _maybe_compress(self) -> None:

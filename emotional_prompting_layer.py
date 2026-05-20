@@ -7,9 +7,13 @@ The assembled payload is ready to send to any LLM; the actual call is out of sco
 
 import time
 import logging
+import re
 from dataclasses import dataclass
 
-from transformers import pipeline
+try:
+    from transformers import pipeline
+except ImportError:  # pragma: no cover - exercised only in missing-dependency envs
+    pipeline = None
 
 # ── System prompt (v5 only) ───────────────────────────────────────────────────
 
@@ -96,8 +100,12 @@ RESET_PHRASES = [
 ]
 
 NEW_TOPIC_SIGNALS = [
-    "actually", "different question", "something else", "unrelated",
+    "different question", "something else", "unrelated",
     "totally different", "another thing", "by the way", "btw",
+]
+NEW_TOPIC_PATTERNS = [
+    re.compile(r"\b(actually|by the way|btw)\b.+\b(not about|different issue|different person)\b"),
+    re.compile(r"\bit'?s about my\b"),
 ]
 
 
@@ -114,7 +122,10 @@ def detect_mode(user_text: str, last_stage: str, turn_index: int) -> str:
         return "reset_requested"
 
     # New topic signals only meaningful after at least 2 turns
-    if turn_index > 1 and any(sig in text_lower for sig in NEW_TOPIC_SIGNALS):
+    if turn_index > 1 and (
+        any(sig in text_lower for sig in NEW_TOPIC_SIGNALS if len(text_lower.split()) >= 6)
+        or any(pattern.search(text_lower) for pattern in NEW_TOPIC_PATTERNS)
+    ):
         return "new_topic"
 
     return "continue"
@@ -138,6 +149,22 @@ HARM_KEYWORDS = [
 ]
 
 GREETINGS = ["hi", "hello", "hey", "hiya", "yo"]
+NEGATED_HARM_PATTERNS = [
+    re.compile(r"\b(not|never|dont|don't|wont|won't)\b.{0,20}\b(kill myself|hurt myself|end it|suicide|cut myself)\b"),
+]
+HIGH_RISK_PATTERNS = [
+    re.compile(r"\b(i want to die|i don't want to live|i am going to kill myself|i want to hurt myself)\b"),
+    re.compile(r"\b(hit me|threatened me|unsafe at home|unsafe right now)\b"),
+]
+
+
+def detect_safety_risk(user_text: str) -> bool:
+    text_lower = user_text.lower().strip()
+    if any(pattern.search(text_lower) for pattern in NEGATED_HARM_PATTERNS):
+        return False
+    if any(pattern.search(text_lower) for pattern in HIGH_RISK_PATTERNS):
+        return True
+    return any(kw in text_lower for kw in HARM_KEYWORDS)
 
 
 def route_stage(emotion: EmotionResult, user_text: str, last_stage: str, mode: str) -> str:
@@ -155,7 +182,7 @@ def route_stage(emotion: EmotionResult, user_text: str, last_stage: str, mode: s
     text_lower = user_text.lower().strip()
 
     # 1. Safety override
-    if any(kw in text_lower for kw in HARM_KEYWORDS):
+    if detect_safety_risk(text_lower):
         return "S0"
 
     # 2. Reset → treat like a fresh start
@@ -163,7 +190,7 @@ def route_stage(emotion: EmotionResult, user_text: str, last_stage: str, mode: s
         return "S6"
 
     # 3. Fresh greeting
-    if any(text_lower.startswith(g) for g in GREETINGS):
+    if text_lower in GREETINGS:
         return "S6"
 
     # 4. Low-confidence fallback
@@ -203,6 +230,10 @@ class EmotionDetector:
 
     def __init__(self):
         logger.info("Loading emotion model: %s", self.MODEL_ID)
+        if pipeline is None:
+            raise ImportError(
+                "transformers is not installed. Install dependencies with `pip install -r requirements.txt`."
+            )
         self.pipe = pipeline(
             "text-classification",
             model=self.MODEL_ID,
