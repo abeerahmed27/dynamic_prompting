@@ -169,6 +169,21 @@ _STORE: dict[tuple[str, str], Framework] = {
             "Keep it to one sentence they could actually say or text."
         ),
     ),
+    ("S4", "communication"): Framework(
+        name="Message Draft Builder",
+        stage="S4",
+        emotion_groups=("communication",),
+        description="Help the user draft a calm, direct message.",
+        micro_steps=(
+            "Start with the specific moment that hurt.",
+            "Say how it landed for you in one plain sentence.",
+            "Ask one clear question or make one clear request.",
+        ),
+        prompt_fragment=(
+            "[Framework: Message Draft Builder] Help them draft a calm, direct message. "
+            "Keep it short, natural, and easy to send."
+        ),
+    ),
 
     # ── S5 Next Steps ─────────────────────────────────────────────────────────────
     ("S5", "distress"): Framework(
@@ -252,6 +267,7 @@ class FrameworkRetriever:
         self,
         stage: str,
         emotion: str,
+        intent: str = "",
     ) -> Optional[Framework]:
         """
         Priority:
@@ -260,6 +276,8 @@ class FrameworkRetriever:
           3. None (pipeline continues without a framework hint)
         """
         group = _EMOTION_TO_GROUP.get(emotion, "neutral")
+        if stage == "S4" and intent == "communication":
+            group = "communication"
         return (
             _STORE.get((stage, group))
             or _STORE.get((stage, "any"))
